@@ -1,0 +1,331 @@
+---
+title: "00_NLSY79_explore"
+author: "Hunter York"
+date: "6/14/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+
+source("../data/default_4/default.R")
+
+data <- data.table(new_data)
+```
+
+
+```{r}
+# Remove the '#' before the following lines to rename variables using Qnames instead of Reference Numbers
+data <- qnames(data)
+setnames(data, gsub("-", "_", names(data), fixed = T))
+setnames(data, gsub("~", "_", names(data), fixed = T))
+
+# create dataset of reasons left each job to use later
+data[,.SD, .SDcols = names(data)[names(data) %like% "EMPLOYERS_ALL_WHYLEFT_MOST_RECENT|CASEID"]] %>%
+  melt(id.vars = "CASEID_1979") -> reasons_quit
+
+data <- data[,.SD, .SDcols = names(data)[names(data) %like% "CASEID|RACE|SEX|SAMPLE_ID|OCCALL|INDALL|HRP|START|STOP|CPSOCC|CPSIND|QES_23A.|QES_PDII|QES_JSW|EMP"]]
+
+rubric <- expand.grid(c.job = 1:5,
+                      c.year = c(1980:1992, seq(1994,2016,2))) %>% 
+  data.table(., stringsAsFactors = F)
+
+for(c.job in 1:5){
+  for(c.year in  c(1980:1992, seq(1994,2016,2))) {
+    data[,paste0("start_", c.job,"_", c.year) := get(paste0("START_WK#_", c.year, "_JOB#0", c.job, "_XRND"))]
+    data[,paste0("stop_", c.job,"_", c.year) := get(paste0("STOP_WK#_", c.year, "_JOB#0", c.job, "_XRND"))]
+    data[,paste0("hrp_", c.job,"_", c.year) := get(paste0("HRP", c.job, "_", c.year))]
+    data[,paste0("occ_", c.job,"_", c.year) := get(paste0("OCCALL_EMP.0", c.job, "_", c.year))]
+    data[,paste0("ind_", c.job,"_", c.year) := get(paste0("INDALL_EMP.0", c.job, "_", c.year))]
+    #
+    data[,paste0("reason_left_", c.job,"_", c.year) := get(paste0("QES_23A.0", c.job, "_", c.year))]
+    # data[,paste0("task_shrt_rpt_", c.job,"_", c.year) := get(paste0("QES_PDIIA.0", c.job, "_000001", c.year))]
+    # data[,paste0("task_phsyical_", c.job,"_", c.year) := get(paste0("QES_PDIIA.0", c.job, "_000002", c.year))]
+    # data[,paste0("task_superv_", c.job,"_", c.year) := get(paste0("QES_PDIIA.0", c.job, "_000003", c.year))]
+    # data[,paste0("task_prob_solv_", c.job,"_", c.year) := get(paste0("QES_PDIIB.0", c.job, "_", c.year))]
+    # data[,paste0("task_math_prob_solv_", c.job,"_", c.year) := get(paste0("QES_PDIIC.0", c.job, "_", c.year))]
+    # data[,paste0("task_longest_doc_read_", c.job,"_", c.year) := get(paste0("QES_PDIID.0", c.job, "_", c.year))]
+    # data[,paste0("task_freq_pers_contact_others_", c.job,"_", c.year) := get(paste0("QES_PDIIE.0", c.job, "_", c.year))]
+    # data[,paste0("task_freq_pers_contact_custs_", c.job,"_", c.year) := get(paste0("QES_PDIIF.0", c.job, "_000001_", c.year))]
+    # data[,paste0("job_stress_past_year", c.job,"_", c.year) := get(paste0("QES_JSWD1.0", c.job, "_", c.year))]
+    # data[,paste0("job_effect_emot_mental_health", c.job,"_", c.year) := get(paste0("QES_JSWD2.0", c.job, "_", c.year))]
+    # data[,paste0("job_effect_phys_health", c.job,"_", c.year) := get(paste0("QES_JSWD3.0", c.job, "_", c.year))]
+    # data[,paste0("can_work_shorter_hours", c.job,"_", c.year) := get(paste0("QES_JSWD4A.0", c.job, "_", c.year))]
+    # data[,paste0("can_work_longer_hours", c.job,"_", c.year) := get(paste0("QES_JSWD4B.0", c.job, "_", c.year))]
+    # data[,paste0("can_work_more_flex_hours", c.job,"_", c.year) := get(paste0("QES_JSWD4C.0", c.job, "_", c.year))]
+    
+    
+    if(c.job == 1 & c.year <= 1993){
+      data[is.na(get(paste0("occ_", c.job,"_", c.year))),
+           paste0("occ_", c.job,"_", c.year) := get(paste0("CPSOCC70_", c.year))]
+      data[is.na(get(paste0("ind_", c.job,"_", c.year))),
+           paste0("ind_", c.job,"_", c.year) := get(paste0("CPSIND70_", c.year))]
+    }
+  }
+}
+
+# loop over all employers ids and put in same format
+data_names <- names(data)
+for (c.job in 1:65){
+  for(c.year in  c(1980:1992, seq(1994,2016,2))) {
+    if (paste0("EMPLOYERS_ALL_ID_", c.year, ".", formatC(c.job, flag = "0", width = 2), "_XRND") %in% data_names) {
+      data[get(paste0("EMPLOYERS_ALL_ID_", c.year, ".", formatC(c.job, flag = "0", width = 2), "_XRND")) == 1 ,paste0("emp_id_", 1,"_", c.year) :=  c.job]
+      data[get(paste0("EMPLOYERS_ALL_ID_", c.year, ".", formatC(c.job, flag = "0", width = 2), "_XRND")) == 2 ,paste0("emp_id_", 2,"_", c.year) :=  c.job]
+      data[get(paste0("EMPLOYERS_ALL_ID_", c.year, ".", formatC(c.job, flag = "0", width = 2), "_XRND")) == 3 ,paste0("emp_id_", 3,"_", c.year) :=  c.job]
+      data[get(paste0("EMPLOYERS_ALL_ID_", c.year, ".", formatC(c.job, flag = "0", width = 2), "_XRND")) == 4 ,paste0("emp_id_", 4,"_", c.year) :=   c.job]
+      data[get(paste0("EMPLOYERS_ALL_ID_", c.year, ".", formatC(c.job, flag = "0", width = 2), "_XRND")) == 5 ,paste0("emp_id_", 5,"_", c.year) :=  c.job]
+    }
+  }
+}
+
+data <- data[,.SD, .SDcols = sort(names(data))]
+
+melt(data,
+     id.vars = c("CASEID_1979",
+                 "SAMPLE_RACE_78SCRN",
+                 "SAMPLE_SEX_1979",
+                 "SAMPLE_ID_1979"), 
+     measure.vars = patterns(start_week = "start_",
+                             stop_week = "stop_",
+                             occ = "occ_",
+                             ind = "ind_",
+                             hourly_pay = "hrp_",
+                             reason_left = "reason_left_",
+                             emp_id = "emp_id_")) -> data_long
+
+# merge on rubric
+rubric <- rubric[order(c.job, c.year)]
+rubric[, variable := 1:nrow(rubric)]
+data_long[, variable := as.numeric(variable)]
+data_long <- merge(data_long, rubric, by = "variable")
+
+## only include 1996 onwards :( 
+## https://www.nlsinfo.org/content/cohorts/nlsy79/other-documentation/codebook-supplement/nlsy79-appendix-18-work-history-data
+
+data_long <- data_long[!is.na(occ)]
+
+
+# now merge on reasons for quitting jobs from earlier
+library(stringr)
+reasons_quit[, emp_id := as.numeric(str_sub(variable, -7, -6))]
+reasons_quit[, reason_quit_recent := value]
+data_long <- merge(data_long, reasons_quit[,.(CASEID_1979, reason_quit_recent, emp_id)], 
+                   by = c("CASEID_1979", "emp_id"), all.x = T)
+```
+
+```{r}
+data_long[, start_day := (start_week* 7)]
+data_long[, stop_day := (stop_week* 7)]
+data_long[, start_date := as.Date(start_day, origin = as.Date("01-01-1978", format = "%m-%d-%Y"))]
+data_long[, stop_date := as.Date(stop_day, origin = as.Date("01-01-1978", format = "%m-%d-%Y"))]
+data_long <- data_long[!is.na(occ)]
+```
+
+```{r}
+data_long[, days_from_work_init := start_date - min(start_date), by = CASEID_1979]
+data_long[, hourly_pay_dollars := hourly_pay/100]
+data_long[, initial_pay := min(hourly_pay_dollars[days_from_work_init == 0]), by = CASEID_1979]
+data_long[, difference_from_first_wage := log10(hourly_pay_dollars) - log10(initial_pay)]
+data_long[, stop_days_from_work_init := stop_date - min(start_date), by = CASEID_1979]
+data_long[, employment_midpoint := (days_from_work_init + stop_days_from_work_init)/2]
+
+ggplot(data_long[CASEID_1979 %in% sample(unique(data_long$CASEID_1979), 100)]) + 
+  geom_segment(aes(x = days_from_work_init/365, 
+                   xend = stop_days_from_work_init/365, 
+                   y = (difference_from_first_wage), 
+                   yend = (difference_from_first_wage),
+                   group = CASEID_1979), alpha = .5) + 
+  ggtitle("Log Hourly Wage Across Earning Lifespan")
+
+ggplot(data_long[CASEID_1979 %in% sample(unique(data_long$CASEID_1979), 100)]) + 
+  geom_line(aes(x = employment_midpoint/365, y = log10(hourly_pay),
+                group = CASEID_1979, color = as.factor(CASEID_1979)), alpha = .5, show.legend = F) + 
+  ggtitle("Log Hourly Wage for All Earners Across Earning Lifespan\n(Midpoint of Each Job X Axis)")
+
+data_long%>% 
+  .[CASEID_1979 %in% sample(unique(CASEID_1979), 100)] %>% 
+  ggplot() + 
+  geom_line(aes(x = employment_midpoint/365, y = difference_from_first_wage,
+                group = CASEID_1979, color = as.factor(CASEID_1979)), alpha = .5, show.legend = F)+ 
+  ggtitle("Log Hourly Wage - Log Initial Hourly Wage for All Earners")
+
+data_long[initial_pay > 14]%>% 
+  .[CASEID_1979 %in% sample(unique(CASEID_1979), 100)] %>% 
+  ggplot() + 
+  geom_line(aes(x = employment_midpoint/365, y = difference_from_first_wage,
+                group = CASEID_1979, color = as.factor(CASEID_1979)), alpha = .5, show.legend = F) + 
+  ggtitle("Log Hourly Wage - Log Initial Hourly Wage for Earners\nWhose Initial Wage was > $14/hr")
+
+
+
+
+```
+
+## see how prestige tracks across time
+
+```{r}
+
+# load xwalk for occ1970
+occ_1970 <- fread("../ref/usa_00013.csv")
+occ_1970[,.(OCC, OCC1990, OCCSCORE, SEI, HWSEI, PRESGL, PRENT, ERSCOR90, EDSCOR90, NPBOSS90)] %>% 
+  unique() -> occ_1970
+occ_1970 <- occ_1970[!(OCC == 0 & OCC1990 == 905)]
+
+# load xwalk for occ2000
+occ_2000 <- fread("../ref/usa_00014.csv")
+occ_2000[,.(OCC, OCCSCORE, SEI, HWSEI, PRESGL, PRENT, ERSCOR90, EDSCOR90, NPBOSS90)] %>% 
+  unique() -> occ_2000
+occ_2000 <- occ_2000[!(OCC == 0)]
+occ_2000 <- occ_2000[!duplicated(OCC)]
+
+data_long_1 <- merge(data_long[c.year <2002], occ_1970, by.x = "occ", by.y = "OCC" , all.x = T)
+
+data_long_2 <- merge(data_long[c.year >=2002], occ_2000, by.x = "occ", by.y = "OCC" , all.x = T)
+
+data_long <- rbind(data_long_1, data_long_2, fill = T)
+
+```
+
+
+```{r}
+data_long[occ != 0]%>% 
+  .[CASEID_1979 %in% sample(unique(CASEID_1979), 2)] %>% 
+  ggplot() +
+  geom_segment(aes(x = days_from_work_init/365, 
+                   xend = stop_days_from_work_init/365, 
+                   y = (SEI), 
+                   yend = (SEI),
+                   group = CASEID_1979), alpha = .5) + 
+  ggtitle("SEI Index (Duncan) Across Earning Lifespan")
+
+data_long[, sei_delta := SEI - SEI[days_from_work_init == 0][1], by = .(CASEID_1979)]
+data_long[, presgl_delta := PRESGL - PRESGL[days_from_work_init == 0][1], by = .(CASEID_1979)]
+
+
+data_long[occ != 0]%>% 
+  .[CASEID_1979 %in% sample(unique(CASEID_1979), 100)] %>% 
+  ggplot() +
+  geom_line(aes(x = employment_midpoint/365, y = SEI,
+                group = CASEID_1979, color = as.factor(CASEID_1979)), alpha = .5, show.legend = F) + 
+  ggtitle("SEI for All Earners Across Earning Lifespan\n(Midpoint of Each Job X Axis)")
+
+data_long[occ != 0]%>% 
+  .[CASEID_1979 %in% sample(unique(CASEID_1979), 100)] %>% 
+  ggplot() +
+  geom_line(aes(x = employment_midpoint/365, y = PRESGL,
+                group = CASEID_1979, color = as.factor(CASEID_1979)), alpha = .5, show.legend = F) + 
+  ggtitle("Prestige (Siegle) for All Earners Across Earning Lifespan\n(Midpoint of Each Job X Axis)")
+
+data_long[occ != 0]%>% 
+  .[CASEID_1979 %in% sample(unique(CASEID_1979), 100)] %>% 
+  ggplot() +
+  geom_line(aes(x = employment_midpoint/365, y = sei_delta,
+                group = CASEID_1979, color = as.factor(CASEID_1979)), alpha = .5, show.legend = F) + 
+  ggtitle("Change in SEI for All Earners Across Earning Lifespan\n(Midpoint of Each Job X Axis)")
+
+data_long[occ != 0]%>% 
+  .[CASEID_1979 %in% sample(unique(CASEID_1979), 100)] %>% 
+  ggplot() +
+  geom_line(aes(x = employment_midpoint/365, y = presgl_delta,
+                group = CASEID_1979, color = as.factor(CASEID_1979)), alpha = .5, show.legend = F) + 
+  ggtitle("Change in Prestige (Siegle) for All Earners Across Earning Lifespan\n(Midpoint of Each Job X Axis)")
+
+
+data_long <- data_long[order(CASEID_1979, start_date)]
+data_long[, lag_SEI := lag(SEI), by = CASEID_1979]
+data_long[, lag_PRESGL := lag(PRESGL), by = CASEID_1979]
+data_long[, lag_hourly_pay_dollars := lag(hourly_pay_dollars), by = CASEID_1979]
+
+data_long[occ != 0]%>% 
+  .[CASEID_1979 %in% sample(unique(CASEID_1979), 5)] %>% 
+  ggplot() +
+  geom_segment(aes(x = days_from_work_init/365, 
+                   xend = stop_days_from_work_init/365, 
+                   y = (SEI), 
+                   yend = (SEI),
+                   group = CASEID_1979,
+                   color = as.factor(CASEID_1979)), alpha = .5) + 
+  geom_segment(aes(x = lag(stop_days_from_work_init)/365, 
+                   xend = days_from_work_init/365, 
+                   y = lag_SEI, 
+                   yend = (SEI),
+                   group = CASEID_1979,
+                   color = as.factor(CASEID_1979)), linetype = "dotted", alpha = .5)
+ggtitle("SEI Index (Duncan) Across Earning Lifespan")
+
+data_long[occ != 0]%>% 
+  .[CASEID_1979 %in% sample(unique(CASEID_1979), 5)] %>% 
+  ggplot() +
+  geom_segment(aes(x = days_from_work_init/365, 
+                   xend = stop_days_from_work_init/365, 
+                   y = log(hourly_pay_dollars), 
+                   yend = log(hourly_pay_dollars),
+                   group = CASEID_1979,
+                   color = as.factor(CASEID_1979)), alpha = .5) + 
+  geom_segment(aes(x = lag(stop_days_from_work_init)/365, 
+                   xend = days_from_work_init/365, 
+                   y = log(lag_hourly_pay_dollars), 
+                   yend = log(hourly_pay_dollars),
+                   group = CASEID_1979,
+                   color = as.factor(CASEID_1979)), linetype = "dotted", alpha = .5)+
+  ggtitle("Log Hourly Pay Across Earning Lifespan")
+
+
+data_long[occ != 0]%>% 
+  .[CASEID_1979 %in% sample(unique(CASEID_1979), 5)] %>% 
+  ggplot() +
+  geom_segment(aes(x = days_from_work_init/365, 
+                   xend = stop_days_from_work_init/365, 
+                   y = PRESGL, 
+                   yend = PRESGL,
+                   group = CASEID_1979,
+                   color = as.factor(CASEID_1979)), alpha = .5) + 
+  geom_segment(aes(x = lag(stop_days_from_work_init)/365, 
+                   xend = days_from_work_init/365, 
+                   y = lag_PRESGL, 
+                   yend = PRESGL,
+                   group = CASEID_1979,
+                   color = as.factor(CASEID_1979)), linetype = "dotted", alpha = .5)+
+  ggtitle("Log Prestige (Siegle) Across Earning Lifespan")
+
+
+```
+
+
+## clean up even more so that occupations match if tenure is constant
+
+```{r}
+data_long <- data_long[order(CASEID_1979, start_week, occ, emp_id)]
+data_long[, date_stop_previous := lag(stop_week), by = .(CASEID_1979, emp_id)]
+data_long[, date_start_next := lead(start_week), by = .(CASEID_1979, emp_id)]
+
+data_long[, cont_emp_from_prev := ifelse(abs(date_stop_previous - start_week) < 2, 1, 0)]
+data_long[, cont_emp_to_next := ifelse(abs(date_start_next - stop_week) < 2, 1, 0)]
+data_long[ stop_week == max(stop_week), cont_emp_to_next  := 1, by = .(CASEID_1979, emp_id)]
+
+data_long[, run_length_id := rleid(cont_emp_to_next), by = .(emp_id, CASEID_1979)]
+
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+
+
+job_sum <- data_long[,.(start_week = min(start_week),
+                        stop_week = max(stop_week),
+                        start_date = min(start_date),
+                        stop_date = max(stop_date),
+                        occ = Mode(occ),
+                        ind = Mode(ind),
+                        low_wage = min(hourly_pay_dollars),
+                        high_wage = max(hourly_pay_dollars),
+                        last_wage = hourly_pay_dollars[start_week == max(start_week)],
+                        reason_left = Mode(reason_quit_recent),
+                        race = Mode(SAMPLE_RACE_78SCRN),
+                        sex = Mode(SAMPLE_SEX_1979),
+                        sample_id = Mode(SAMPLE_ID_1979)), by = .(CASEID_1979, emp_id,run_length_id)]
+```
