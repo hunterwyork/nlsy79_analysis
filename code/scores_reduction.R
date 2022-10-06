@@ -256,7 +256,60 @@ skills_final <-skills_wide[,lapply(.SD, mean), by = .(OCC1990), .SDcols = vars]
 inputs <- skills_final[,.SD,.SDcols = names(skills_final)[names(skills_final) %like% ".LV"]]
 inputs <- inputs[,.SD,.SDcols = names(inputs)[!names(inputs) %like% "Job|Apprent"]]
 
-fact_anal_orig <- fa(inputs, 10, rotate = "varimax", scores = "regression")
+fact_anal_orig <- factanal(inputs, 10, rotation = "varimax", scores = "regression")
 
 scores_out <- fact_anal_orig$scores %>% data.table()
 scores_out[, OCC1990 := skills_final$OCC1990]
+
+
+
+#######################################################
+
+
+facys <- data.frame(matrix(as.numeric(fact_anal_orig$loadings), attributes(fact_anal_orig$loadings)$dim, dimnames=attributes(fact_anal_orig$loadings)$dimnames))
+
+# make a little figure showing top 5 traits per factor
+get_vars <- function(df, x, n){
+  df <- data.table(df, keep.rownames = T)
+  y <- df[, get(x)] %>% abs() %>% order(decreasing = T)
+  signs <-  df[, get(x)][y] %>% sign()
+  signs <- ifelse(signs == -1, "---", "")
+  out <- df[, rn][y][1:n]
+  out <- paste0(signs[1:n], out, signs[1:n])
+  out <- gsub( ".LV", "", out)
+  return(out)
+}
+
+table3 <- lapply(names(facys)[!names(facys) %like% "rn"], get_vars, df = facys, n = 10)
+table3 <- lapply(table3, function(x){paste0(x, collapse = "; ")})
+
+
+
+
+factors_names <- c(paste0("fact_", 1:10,"_",
+                          c("Problem Solving", 
+                            "Depth Perception/Repairing",
+                            "Concern/Caring/Self Control",
+                            "Attention to Detail/Time Pressure",
+                            "Sensory Acuity/In Enclosed/Outdoors",
+                            "Sales/Financial Management/Accounting",
+                          "Leadership/Admin",
+                          "Visual Acuity/Pattern Recognition",
+                            "Sciences/Medicine",
+                            "Construction/Engineering/Outdoors"
+                          )))
+
+
+factors_names <- paste0(factors_names, "_fac")
+setnames(scores_out, names(scores_out)[names(scores_out) %like% "Factor"], factors_names)
+
+
+# make that table now
+maxes <- lapply(factors_names, function(x){scores_out[which.max(get(x)), OCC1990]})
+mins <- lapply(factors_names, function(x){scores_out[which.min(get(x)), OCC1990]})
+
+table_out3 <- data.table(Factor = factors_names, 
+                         `Top 5 Components` = table3, 
+                         `Maximum Occupation` = maxes, 
+                         `Minimum Occupation` = mins)
+
