@@ -1,0 +1,165 @@
+---
+title: "00_NLSY79_explore"
+author: "Hunter York"
+date: "6/14/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = T)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+
+# source("../data/default_4/default.R")
+theme_set(theme_bw(base_size = 7))
+
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# 
+# saveRDS(job_sum, "../ref/job_sum_06052020.rds")
+# saveRDS(skills_final, "../ref/skills_final.rds")
+
+job_sum <- readRDS("../ref/job_sum_06052020.rds")
+skills_final <- readRDS("../ref/skills_final.rds")
+
+```
+
+#
+
+```{r}
+# create transition matrix 
+skills_dist <- dist(skills_final[,-1]) %>% as.matrix() %>% data.frame() %>% data.table()
+names(skills_dist) <- as.character(skills_final$OCC1990)
+skills_dist[, occ := skills_final$OCC1990]
+skills_dist <- melt(skills_dist, id.vars = "occ")
+```
+
+#
+
+```{r}
+job_sum <- job_sum[, .SD, .SDcols = names(job_sum)[!names(job_sum) %like% ".LV"]]
+
+job_sum <- job_sum[order(CASEID_1979, start_date)]
+job_sum[, job_number := rleid(occ_1990), by = .(CASEID_1979)]
+
+#
+job_sum <- job_sum[CASEID_1979 %in% sample(unique(job_sum$CASEID_1979), 500)]
+
+job_sum_wide <- dcast(job_sum[!is.na(CASEID_1979)],  CASEID_1979~ job_number , value.var = "occ_1990", fun.aggregate = getmode)
+
+library(TraMineR)
+
+seq_job_sum <- seqdef(job_sum_wide, var = 2:11)
+atts <- attr(seq_job_sum, "alphabet")
+skills_dist_mat <- dist(skills_final[OCC1990 %in% atts,.SD,.SDcols = names(skills_final)[names(skills_final) %like% "skl"]]) %>% as.matrix()
+
+```
+
+# exposures to jobs
+
+```{r}
+# breaks_away <- readRDS( "../ref/breaks_away.rds")
+# breaks_away <- merge(breaks_away, skills_final, by.x = "occ_1990", by.y = "OCC1990")
+# breaks_away <- breaks_away[order(CASEID_1979, break_bin)]
+# breaks_away[, bin_width := as.numeric(lead(break_bin) - break_bin), by = .(CASEID_1979)]
+# vars <- names(breaks_away)[names(breaks_away) %like% ".LV"]
+# breaks_away[, paste0("exp_", vars) := lapply(.SD, function(x){bin_width*x^2}), .SDcols = vars]
+# breaks_away[, paste0("cum_", vars) := lapply(.SD, cumsum), .SDcols = paste0("exp_", vars), by = CASEID_1979]
+```
+
+#
+
+```{r}
+# 
+# breaks_away[, highest_grade_bin := cut(highest_grade, breaks = c(0,11,12,15, 16, 20))]
+# breaks_away[, terminal_occ := getmode(occ_1990[stop_week == max(stop_week)]), by = CASEID_1979]
+# breaks_away[, beginning_occ := getmode(occ_1990[stop_week == min(stop_week)]), by = CASEID_1979]
+# 
+# breaks_away_melt <- melt(breaks_away, id.vars = c("highest_grade","highest_grade_bin",
+#                                                   "terminal_occ", "beginning_occ", 
+#                                                   "CASEID_1979", "break_bin",
+#                                                   "sex", "race"),
+#                          measure.vars = patterns("cum_"))
+# 
+# ggplot(breaks_away_melt[CASEID_1979 %in% 1:500 &
+#                      break_bin <= 10000 & 
+#                      variable %in% paste0("cum_",vars[vars %like%"act"][1:20])]) + 
+#     geom_smooth(aes(x  = break_bin, y = value, color = as.factor(highest_grade_bin)), show.legend = T) +
+#   facet_wrap(~variable)
+# 
+# ggplot(breaks_away_melt[CASEID_1979 %in% 1:500 &
+#                      break_bin <= 10000 & 
+#                      variable %in% paste0("cum_",vars[vars %like%"act"][1:20])]) + 
+#     geom_smooth(aes(x  = break_bin, y = value, color = paste0(sex, "_", race)), show.legend = T) +
+#   facet_wrap(~variable)
+# 
+# 
+# ggplot(breaks_away_melt[terminal_occ %in% sample(unique(breaks_away$occ_1990), 6) &
+#                           break_bin %in% (sort(unique(breaks_away_melt$break_bin)) %>% .[seq(1,length(.), 5)]) &
+#                      break_bin <= 10000 & 
+#                      variable %in% paste0("cum_",vars[vars %like%"skl"][1:20])]) + 
+#     geom_smooth(aes(x  = break_bin, y = value, color = as.factor(terminal_occ)), show.legend = T) +
+#   facet_wrap(~variable)
+# 
+# ggplot(breaks_away_melt[beginning_occ %in% sample(unique(breaks_away$occ_1990), 6) &
+#                           break_bin %in% (sort(unique(breaks_away_melt$break_bin)) %>% .[seq(1,length(.), 5)]) &
+#                      break_bin <= 10000 & 
+#                      variable %in% paste0("cum_",vars[vars %like%"skl"][1:20])]) + 
+#     geom_smooth(aes(x  = break_bin, y = value, color = as.factor(beginning_occ)), show.legend = T) +
+#   facet_wrap(~variable)
+# 
+# ggplot(breaks_away_melt[CASEID_1979 %in% 1:50 &
+#                      break_bin <= 10000 & 
+#                      variable %in% paste0("cum_",vars[vars %like%"act"][1:9])]) + 
+#     geom_line(aes(x  = break_bin, y = value, color = as.factor(CASEID_1979)), show.legend =F) +
+#   facet_wrap(~variable)
+
+```
+
+#switch back to sequence history 
+
+```{r}
+seq_dists <- seqdist(seq_job_sum, method = "OM", sm = skills_dist_mat)
+library(cluster)
+clusterward1 <- agnes(seq_dists, diss = TRUE, method = "ward")
+
+cl1.4 <- cutree(clusterward1, k = 6)
+cl1.4fac <- factor(cl1.4, labels = paste("Type", 1:6))
+#seqIplot(seq_job_sum, group = cl1.4fac, sortv = "from.start")
+
+
+### xwalk to soc :( 
+
+occ_1990_2010_xwalk <- fread("../ref/usa_00017.csv")
+occ_1990_2010_xwalk[,.(OCC, OCC2010, PRENT)] %>% unique() -> occ_1990_2010_xwalk
+setnames(occ_1990_2010_xwalk, "OCC", "OCC1990")
+
+occ_2010_soc_xwalk <- fread("../ref/usa_00018.csv")
+occ_2010_soc_xwalk[,.(OCC, OCCSOC)] %>% unique() -> occ_2010_soc_xwalk
+setnames(occ_2010_soc_xwalk, "OCC", "OCC2010")
+
+occ_1990_soc_xwalk <- merge(occ_1990_2010_xwalk, occ_2010_soc_xwalk, by = "OCC2010")
+
+
+soc_xwalk <- fread("../../monster_jobs/inputs/soc_hierarchy_xwalk.csv")
+occ_1990_soc_xwalk_new <- occ_1990_soc_xwalk[!duplicated(OCC1990)]
+occ_1990_soc_xwalk_new[, occ_agg_group := as.numeric(substr(OCCSOC,1,2))]
+occ_1990_soc_xwalk_new <- merge(occ_1990_soc_xwalk_new, soc_xwalk, by = "occ_agg_group")
+
+job_sum <- merge(job_sum, occ_1990_soc_xwalk_new, by.x = "occ_1990", by.y = "OCC1990")
+job_sum[, PRENT_bin := cut(PRENT, quantile(PRENT, seq(0,1, .2), na.rm = T))]
+
+
+job_sum_wide_soc <- dcast(job_sum[!is.na(CASEID_1979)],  CASEID_1979~ job_number , value.var = "PRENT_bin", fun.aggregate = getmode)
+
+
+seq_job_sum_soc <- seqdef(job_sum_wide_soc, var = 2:11)
+
+seqIplot(seq_job_sum_soc, group = cl1.4fac, sortv = "from.start")
+
+```
+

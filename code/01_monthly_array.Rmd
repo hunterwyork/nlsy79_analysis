@@ -1,0 +1,166 @@
+---
+title: "01_monthly_array"
+author: "Hunter York"
+date: "7/1/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(data.table)
+library(dplyr)
+library(parallel)
+library(TraMineR)
+library(umap)
+library(dbscan)
+
+job_sum <- readRDS("../ref/job_sum.rds")
+```
+
+# Transform into monthly for first two years, bimonthly for the next three years and then twice yearly array
+
+```{r}
+breax <- c(seq(0, 720, 30), seq(781, 1818, 61), seq(2000, 14600, 182))
+
+get_subset <- function(d.data, c.break, work_start){
+  d.data[ start_date <= work_start + c.break & stop_date > work_start + c.break] %>%  
+    .[, break_bin := c.break] %>% return(.)
+}
+
+arrayr <- function(c.id, c.data, c.breaks){
+  work_start <- c.data[CASEID_1979 == c.id, min(start_date)]
+  lapply(c.breaks, get_subset, d.data = c.data[CASEID_1979 == c.id], work_start = work_start) %>% 
+    rbindlist()
+}
+
+#mclapply(unique(job_sum$CASEID_1979)[1:100], arrayr, mc.cores = 4, c.data = job_sum, c.breaks = breax) %>%
+#rbindlist() -> breaks_away
+
+#saveRDS(breaks_away, "../ref/breaks_away.rds")
+breaks_away <- readRDS( "../ref/breaks_away.rds")
+```
+
+# 
+
+```{r}
+breaks_away[, break_step := as.numeric(factor(break_bin, levels = breax))]
+breaks_away[, terminal_occ := occ_1990[!is.na(occ) & stop_date == max(stop_date)][1], by = .(CASEID_1979)]
+breaks_away[, beginning_occ := occ_1990[!is.na(occ) & stop_date == min(stop_date)][1], by = .(CASEID_1979)]
+breaks_away <- breaks_away[!is.na(CASEID_1979)]
+
+occ_1990_2010_xwalk <- fread("../ref/usa_00017.csv")
+occ_1990_2010_xwalk[,.(OCC, OCCSCORE, SEI, PRESGL, PRENT, ERSCOR90)] %>% unique() -> occ_1990_2010_xwalk
+setnames(occ_1990_2010_xwalk, "OCC", "occ_1990")
+occ_1990_2010_xwalk <- occ_1990_2010_xwalk[!duplicated(occ_1990)]
+breaks_away <- merge(breaks_away, occ_1990_2010_xwalk)
+breaks_away[, pregl_quant := cut(PRESGL, quantile(PRESGL, seq(0,1, .2)))]
+
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+breaks_away_wide <- dcast(breaks_away[!is.na(CASEID_1979)],  CASEID_1979~ break_step , value.var = "pregl_quant", fun.aggregate = getmode)
+
+
+order_cases <- breaks_away_wide[do.call(order, c(breaks_away_wide[,.SD, .SDcols = names(breaks_away_wide)[-1]], list(decreasing = T))),]$CASEID_1979
+
+breaks_away[, terminal_pregl_quant := pregl_quant[pregl_quant != 0 & stop_date == max(stop_date)][1], by = .(CASEID_1979)]
+breaks_away[, beginning_pregl_quant := pregl_quant[pregl_quant != 0 & stop_date == min(stop_date)][1], by = .(CASEID_1979)]
+
+
+
+breaks_away[,CASEID_1979 := factor(CASEID_1979, levels = order_cases)]
+ggplot(breaks_away[sex == 1 ]) + 
+  geom_tile(aes(x = break_step, y = CASEID_1979, fill =pregl_quant)) + 
+  theme_void()
+
+```
+
+## try more simple approach of just first 10 jobs
+
+```{r}
+job_sum <- job_sum[order(CASEID_1979, start_date)]
+job_sum[, job_number := rleid(occ_1990), by = .(CASEID_1979)]
+job_sum_first_10 <- job_sum[job_number <= 10]
+
+job_sum_first_10 <- merge(job_sum_first_10, occ_1990_2010_xwalk)
+job_sum_first_10[, pregl_quant := cut(PRESGL, quantile(PRESGL, seq(0,1, .2)), labels = 1:5)]
+
+job_sum_first_10_wide <- dcast(job_sum_first_10[!is.na(CASEID_1979)],  CASEID_1979~ job_number , value.var = "pregl_quant", fun.aggregate = getmode)
+
+
+order_cases <- job_sum_first_10_wide[do.call(order, c(job_sum_first_10_wide[,.SD, .SDcols = names(job_sum_first_10_wide)[-1]], list(decreasing = T))),]$CASEID_1979
+
+job_sum_first_10[,CASEID_1979_factor := factor(CASEID_1979, levels = order_cases) ]
+
+ggplot(job_sum_first_10[sex == 1 ]) + 
+  geom_tile(aes(x = job_number, y = CASEID_1979_factor, fill =as.factor(pregl_quant)),show.legend = T) + 
+  scale_fill_viridis_d() +
+  theme_void()
+```
+
+# perform sequence analysis
+
+```{r}
+
+seq_job_sum <- seqdef(job_sum_first_10_wide[complete.cases(job_sum_first_10_wide)], var = 2:11)
+seqdplot(seq_job_sum, with.legend = FALSE, border = NA)
+seqfplot(seq_job_sum, with.legend = FALSE, border = NA)
+
+dist.om1 <- seqdist(seq_job_sum, method = "OM", indel = 1, sm = "TRATE")
+library(cluster)
+#clusterward1 <- agnes(dist.om1, diss = TRUE, method = "ward")
+
+plot(clusterward1, which.plot = 2)
+cl1.4 <- cutree(clusterward1, k = 4)
+cl1.4fac <- factor(cl1.4, labels = paste("Type", 1:4))
+temp <- cbind(job_sum_first_10_wide[complete.cases(job_sum_first_10_wide), CASEID_1979], cl1.4fac) %>% 
+  data.table()
+
+
+ggplot(merge(job_sum_first_10, temp, by.x = "CASEID_1979", by.y = "V1")) + 
+  geom_tile(aes(x = job_number, y = (CASEID_1979_factor),
+                fill =as.factor(pregl_quant)),show.legend = T) + 
+  scale_fill_viridis_d() +
+  theme_void()+
+  facet_wrap(~cl1.4fac, scales = "free")
+
+
+
+```
+
+# now try sequence analysis with time data
+
+```{r}
+job_sum[,min_start := min(start_date), by = .(CASEID_1979)]
+job_sum[,start_day := as.numeric(start_date - min_start) + 1]
+job_sum[,stop_day := as.numeric(stop_date - min_start) + 1]
+job_sum[, start_month := round(start_day/30) + 1]
+job_sum[, stop_month := round(stop_day/30) + 1]
+
+
+job_sum_seq <- merge(job_sum, occ_1990_2010_xwalk, all.x = T)
+job_sum_seq <- job_sum_seq[order(CASEID_1979, start_day)]
+job_sum_seq[, pregl_quant := cut(PRESGL, quantile(PRESGL, seq(0,1, .2), na.rm = T), labels = 1:5)]
+job_sum_seq <- job_sum_seq[!CASEID_1979 %in% job_sum_seq[stop_day < start_day, unique(CASEID_1979)]]
+
+LA.seq <- seqdef(job_sum_seq[1:10000], var = c("CASEID_1979", "start_month", "stop_month",
+                             "pregl_quant"), informat = "SPELL",
+                 process = FALSE)
+
+
+dist.om1 <- seqdist(LA.seq, method = "OM", indel = 1, sm = "TRATE", with.missing = T)
+library(cluster)
+clusterward1 <- agnes(dist.om1, diss = TRUE, method = "ward")
+
+plot(clusterward1, which.plot = 2)
+cl1.4 <- cutree(clusterward1, k = 4)
+cl1.4fac <- factor(cl1.4, labels = paste("Type", 1:4))
+seqIplot(LA.seq, group = cl1.4fac, sortv = "from.start")
+
+
+
+```
+

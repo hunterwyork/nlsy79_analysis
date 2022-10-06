@@ -1,0 +1,164 @@
+---
+title: "03_aspirations_expectations"
+author: "Hunter York"
+date: "7/5/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+
+# source("../data/default_4/default.R")
+theme_set(theme_bw(base_size = 7))
+
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# 
+# saveRDS(job_sum, "../ref/job_sum_06052020.rds")
+# saveRDS(skills_final, "../ref/skills_final.rds")
+
+job_sum <- readRDS("../ref/job_sum_06052020.rds")
+skills_final <- readRDS("../ref/skills_final.rds")
+
+source("../data/asp_exp_data/asp_exp_data.R")
+data <- data.table(new_data)
+# Remove the '#' before the following lines to rename variables using Qnames instead of Reference Numbers
+data <- qnames(data)
+setnames(data, gsub("-", "_", names(data), fixed = T))
+setnames(data, gsub("~", "_", names(data), fixed = T))
+data <- data[EXP_1_1979 %in% c(1,2) & EXP_1_1982 %in% c(1,2),
+             .(CASEID_1979, AGEATINT_1979, EXP_OCC_1979,EXP_3_1979,EXP_10A_1979, EXP_OCC_1982, EXP_3_1982)]
+data <- data[complete.cases(data)]
+```
+
+# Xwalk to 1950 and merge on meso/micro/macroclass
+
+```{r}
+#cheng xwalk
+cheng <- data.table(readstata13::read.dta13("../../occupation/ref/occ1950_mc_xwalk_70.dta"))
+cheng[, occ1950 := gsub("[^A-Za-z0-9]", "", tolower(occ1950))]
+# occ50 recode
+occ50_recode <- fread("../../occupation/ref/occ1950_recode.csv")
+occ50_recode <- occ50_recode[,1:2]
+names(occ50_recode) <- unlist(occ50_recode[1, ])
+occ50_recode <- occ50_recode[-1,]
+occ50_recode <- occ50_recode[!is.na(as.numeric(occ1950_num))]
+occ50_recode[, occ1950 := gsub("[^A-Za-z0-9]", "", tolower(occ1950))]
+# merge
+cheng <- merge(cheng, occ50_recode[,.(occ1950, occ1950_num)], all.x = T)
+#fix the stragglers
+fix <- cheng[is.na(occ1950_num)]
+candidates <- occ50_recode[!occ1950 %in% cheng$occ1950]
+for(c.fix in 1:nrow(fix)){
+  goal <- substr(fix[c.fix, occ1950],1,7)
+  new <- candidates[candidates$occ1950 %like% goal, occ1950_num]
+  if(length(new) == 1){fix[c.fix, new_occ1950_num := new]}
+}
+fix[is.na(new_occ1950_num), new_occ1950_num := c(43, 34, 44, 603, 16, 46, 605,94, 19,48,69,84,26,23,27,29)]
+cheng <- merge(cheng, fix[,.(occ1950, new_occ1950_num)], by = "occ1950", all.x = T)
+cheng[is.na(occ1950_num), occ1950_num := new_occ1950_num]
+cheng[, occ1950_num := as.numeric(occ1950_num)]
+cheng[, new_occ1950_num := NULL]
+setnames(cheng, "occ1950_num", "OCC1950")
+cheng[, occ1950 := NULL]
+factorr <- function(x){ifelse(is.character(x), return(factor(x)), return(x))}
+cheng[,names(cheng) := lapply(.SD, factorr), .SDcols = names(cheng)]
+
+occ_1950_70_xwalk <- fread("../ref/usa_00019.csv")
+occ_1950_70_xwalk %>% unique() -> occ_1950_70_xwalk
+setnames(occ_1950_70_xwalk, "OCC", "OCC1970")
+
+cheng <- merge(cheng, occ_1950_70_xwalk)
+cheng <- cheng[OCC1970 != 0]
+
+data <- merge(data, cheng[,.(microocc, mesoocc, macroocc, OCC1970)], by.x = "EXP_OCC_1979", by.y = "OCC1970")
+setnames(data, c("microocc", "mesoocc", "macroocc"), paste0(c("microocc", "mesoocc", "macroocc"), "_1979_exp_35"))
+data <- merge(data, cheng[,.(microocc, mesoocc, macroocc, OCC1970)], by.x = "EXP_10A_1979", by.y = "OCC1970")
+setnames(data, c("microocc", "mesoocc", "macroocc"), paste0(c("microocc", "mesoocc", "macroocc"), "_1979_exp_5_yrs"))
+data <- merge(data, cheng[,.(microocc, mesoocc, macroocc, OCC1970)], by.x = "EXP_OCC_1982", by.y = "OCC1970")
+setnames(data, c("microocc", "mesoocc", "macroocc"), paste0(c("microocc", "mesoocc", "macroocc"), "_1982_exp_35"))
+
+```
+
+# merge on prestige scores
+
+```{r}
+occ_70_prestige_xwalk <- fread("../ref/usa_00020.csv")
+occ_70_prestige_xwalk %>% unique() -> occ_70_prestige_xwalk
+setnames(occ_70_prestige_xwalk, "OCC", "OCC1970")
+occ_70_prestige_xwalk[, OCC1950 := NULL]
+vars <- names(occ_70_prestige_xwalk)[!names(occ_70_prestige_xwalk) %like% "OCC1970"]
+
+
+data <- merge(data, occ_70_prestige_xwalk, by.x = "EXP_OCC_1979", by.y = "OCC1970")
+setnames(data, vars, paste0(vars, "_1979_exp_35"))
+data <- merge(data, occ_70_prestige_xwalk, by.x = "EXP_10A_1979", by.y = "OCC1970")
+setnames(data, vars, paste0(vars, "_1979_exp_5_yrs"))
+data <- merge(data, occ_70_prestige_xwalk, by.x = "EXP_OCC_1982", by.y = "OCC1970")
+setnames(data, vars, paste0(vars, "_1982_exp_35"))
+
+data_melt <- melt(data, id.vars = c("AGEATINT_1979", "CASEID_1979", "mesoocc_1979_exp_35"), measure.vars = patterns("PRENT_"))
+ggplot(data_melt) + 
+  geom_line(aes(x = variable, y = value, group = CASEID_1979, color = as.factor(CASEID_1979)), show.legend = F) + 
+  geom_boxplot(aes(x = variable, y = value)) + 
+  facet_grid(.~ifelse(AGEATINT_1979>18,1,0))
+```
+
+# merge on realized job at age 35
+
+```{r}
+job_sum <- readRDS("../ref/job_sum.rds")
+
+temp <- data.table(new_data)
+# Remove the '#' before the following lines to rename variables using Qnames instead of Reference Numbers
+temp <- qnames(temp)
+setnames(temp, gsub("-", "_", names(temp), fixed = T))
+setnames(temp, gsub("~", "_", names(temp), fixed = T))
+
+job_sum <- merge(job_sum, temp[,.(CASEID_1979, AGEATINT_1979)])
+job_sum[, date_35 := as.Date(paste0(1979 - AGEATINT_1979 + 35, "-06-01"), "%Y-%m-%d")]
+occs_35 <- job_sum[,.(occ_35 = occ_1990[which.min(abs(date_35 - start_date))]), by = .(CASEID_1979)]
+
+data <- merge(data, occs_35, by = "CASEID_1979")
+
+
+data <- merge(data, occ_70_prestige_xwalk, by.x = "occ_35", by.y = "OCC1970")
+setnames(data, vars, paste0(vars, "_act_occ_35"))
+data <- merge(data, cheng[,.(microocc, mesoocc, macroocc, OCC1970)], by.x = "occ_35", by.y = "OCC1970")
+setnames(data, c("microocc", "mesoocc", "macroocc"), paste0(c("microocc", "mesoocc", "macroocc"), "_act_occ_35"))
+
+
+data_melt <- melt(data, id.vars = c("AGEATINT_1979", "CASEID_1979", "mesoocc_1979_exp_35"), measure.vars = patterns("PRENT_"))
+ggplot(data_melt) + 
+  geom_line(aes(x = variable, y = value, group = CASEID_1979, color = as.factor(CASEID_1979)), show.legend = F) + 
+  geom_boxplot(aes(x = variable, y = value)) + 
+  facet_grid(.~ifelse(AGEATINT_1979>18,1,0))
+```
+
+# create a simple natural experiment
+
+```{r}
+data[AGEATINT_1979 %in% 19:21, age_bin := "age_19_to_21_1979"]
+data[AGEATINT_1979 %in% 16:18, age_bin := "age_16_to_18_1979"]
+data[age_bin == "age_19_to_21_1979", aspiration_19_21 := PRENT_1979_exp_35 ]
+data[age_bin == "age_16_to_18_1979", aspiration_19_21 := PRENT_1982_exp_35 ]
+data[age_bin == "age_19_to_21_1979", meso_19_21 := mesoocc_1979_exp_35 ]
+data[age_bin == "age_16_to_18_1979", meso_19_21 := mesoocc_1982_exp_35 ]
+
+data_melt <- melt(data, id.vars = c("AGEATINT_1979", "CASEID_1979", "age_bin", "meso_19_21"), measure.vars = c("aspiration_19_21",
+                                                                                                             "PRENT_act_occ_35"))
+ggplot(data_melt[!is.na(age_bin)]) + 
+    geom_boxplot(aes(x = variable, y = value)) +
+  geom_line(aes(x = variable, y = value, group = CASEID_1979, color = as.factor(CASEID_1979)), show.legend = F, alpha = .05) + 
+  facet_grid(meso_19_21~age_bin)
+```
+
+
+
+
